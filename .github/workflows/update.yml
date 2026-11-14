@@ -1,33 +1,73 @@
-name: Auto Conve IPTV
+name: Sync live.txt from upstream
+
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 */12 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: sync-live-txt
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
 jobs:
-  build:
+  sync:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 拉取仓库代码
+      - name: Check out donor repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 安装Node环境
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Fetch upstream and detect live.txt changes
+        id: upstream
+        shell: bash
+        run: |
+          git remote add upstream https://github.com/807080747/iptv-txt-conve.git || true
+          git fetch upstream main
+          if git diff --quiet HEAD upstream/main -- live.txt; then
+            echo "live_txt_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream live.txt change detected."
+          else
+            echo "live_txt_changed=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream live.txt changed; preparing sync."
+          fi
+      - name: Restore live.txt from upstream cleanly
+        if: steps.upstream.outputs.live_txt_changed == 'true'
+        shell: bash
+        run: |
+          git reset --hard HEAD
+          git clean -fd
+          git restore --source=upstream/main --staged --worktree live.txt
+      - name: Set up Node.js
+        if: steps.upstream.outputs.live_txt_changed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: 安装依赖
+      - name: Install dependencies
+        if: steps.upstream.outputs.live_txt_changed == 'true'
         run: npm install
 
-      - name: 执行转换脚本
+      - name: Regenerate live.txt
+        if: steps.upstream.outputs.live_txt_changed == 'true'
         run: node conve.js
 
-      - name: 提交更新后的 live.txt
+      - name: Commit and push if changed
+        if: steps.upstream.outputs.live_txt_changed == 'true'
+        shell: bash
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
           git add live.txt
-          git commit -m "Auto update iptv list" || echo "无内容无需提交"
-          git push
+          if git diff --cached --quiet; then
+            echo "No live.txt changes to commit"
+            exit 0
+          fi
+          git commit -m "Sync live.txt with upstream"
+          git push origin HEAD
