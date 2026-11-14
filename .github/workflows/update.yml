@@ -26,6 +26,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Fetch upstream and detect live.txt changes
         id: upstream
         shell: bash
@@ -39,6 +40,7 @@ jobs:
             echo "live_txt_changed=true" >> "$GITHUB_OUTPUT"
             echo "Upstream live.txt changed; preparing sync."
           fi
+
       - name: Restore live.txt from upstream cleanly
         if: steps.upstream.outputs.live_txt_changed == 'true'
         shell: bash
@@ -46,6 +48,7 @@ jobs:
           git reset --hard HEAD
           git clean -fd
           git restore --source=upstream/main --staged --worktree live.txt
+
       - name: Set up Node.js
         if: steps.upstream.outputs.live_txt_changed == 'true'
         uses: actions/setup-node@v4
@@ -60,14 +63,18 @@ jobs:
         if: steps.upstream.outputs.live_txt_changed == 'true'
         run: node conve.js
 
+      - name: Convert live.txt to live.m3u
+        if: steps.upstream.outputs.live_txt_changed == 'true'
+        run: node txt-to-m3u.js
+
       - name: Commit and push if changed
         if: steps.upstream.outputs.live_txt_changed == 'true'
         shell: bash
         run: |
-          git add live.txt
+          git add live.txt live.m3u
           if git diff --cached --quiet; then
-            echo "No live.txt changes to commit"
+            echo "No live.txt or live.m3u changes to commit"
             exit 0
           fi
-          git commit -m "Sync live.txt with upstream"
+          git commit -m "Sync live.txt and generate live.m3u"
           git push origin HEAD
